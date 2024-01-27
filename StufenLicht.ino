@@ -3,17 +3,32 @@
 #include <NeoPixelBus.h>
 #include <Preferences.h>
 
-Preferences preferences;
+#define RW_MODE false
+#define RO_MODE true
 
-int receivePin = 3;
+Preferences data;
+
+int recievePin = 3;
 int transmitPin = 1;
 int enablePin = 4;
 
 dmx_port_t dmxPort = 1;
-byte data[DMX_MAX_PACKET_SIZE];
+byte DMXdata[DMX_MAX_PACKET_SIZE];
 QueueHandle_t queue;
 unsigned int timer = 0;
 bool dmxIsConnected = false;
+
+uint16_t DMXStart;
+uint16_t NumPixelA;
+uint16_t NumPixelB;
+uint16_t NumPixelC;
+uint16_t NumPixelD;
+
+uint8_t PinStripA = 26;
+uint8_t PinStripB = 25;
+uint8_t PinStripC = 32;
+uint8_t PinStripD = 33;
+
 
 uint8_t Red = 0;
 uint8_t Blue = 0;
@@ -26,23 +41,33 @@ int32_t lastBlink = 0;
 byte blinkState = 0;
 uint8_t progress = 0;
 
-NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Sk6812Method> StripA (NumPixelA, PinStripA);
-NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt1Sk6812Method> StripB (NumPixelB, PinStripB);
-
-
 void setup(){
-  Serial.begin(115200);
-  preferences.begin("DMXPreferences",RO_MODE);
-  if !isKey("DMXStartAddr")
-    preferences.begin("DMXPreferences", RW_MODE);
+  data.begin("DMXPreferences", RO_MODE);
+  if (!data.isKey("DMXStartAddr")){
+    data.begin("DMXPreferences", RW_MODE);
     //first boot enter Web config
   }
   else{
-    DMXStart = preferences.getUShort("DMXStartAddr");
-    NumPixelA = preferences.getUInt("NumPixelStipA");
-    NumPixelB = preferences.getUInt("NumPixelStipB");
-    NumPixelC = preferences.getUInt("NumPixelStripC");
-    NumPixelD = preferences.getUInt("NumPixelStripD");
+    uint16_t DMXStart = data.getUShort("DMXStartAddr");
+    uint16_t NumPixelA = data.getUInt("NumPixelStipA");
+    uint16_t NumPixelB = data.getUInt("NumPixelStipB");
+    uint16_t NumPixelC = data.getUInt("NumPixelStripC");
+    uint16_t NumPixelD = data.getUInt("NumPixelStripD");
+  }
+  if (NumPixelA != 0){
+    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Sk6812Method> StripA(NumPixelA, PinStripA);
+  }
+
+  if (NumPixelB != 0){
+    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt1Sk6812Method> StripB(NumPixelB, PinStripB);
+  }
+
+  if (NumPixelC != 0){
+    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt2Sk6812Method> StripC(NumPixelC, PinStripC);
+  }
+
+  if (NumPixelD != 0){
+    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt3Sk6812Method> StripD(NumPixelD, PinStripD);
   }
 
   dmx_config_t dmxConfig = DMX_DEFAULT_CONFIG;
@@ -52,9 +77,18 @@ void setup(){
   int interruptPriority = 1;
   dmx_driver_install(dmxPort, DMX_MAX_PACKET_SIZE, queueSize, &queue, interruptPriority);
 
-  StripA.Begin();
-  StripB.Begin();
-
+  if (NumPixelA != 0){
+    StripA.Begin();
+  }
+  if (NumPixelB != 0){
+    StripB.Begin();
+  }
+  if (NumPixelC != 0){
+    StripC.Begin();
+  }
+  if (NumPixelD != 0){
+    StripD.Begin();
+  }
   StripA.Show();
   StripB.Show();
 }
@@ -67,17 +101,17 @@ void loop(){
         Serial.println("DMX connected!");
         dmxIsConnected = true;
       }
-      dmx_read_packet(dmxPort, data, packet.size);
+      dmx_read_packet(dmxPort, DMXdata, packet.size);
       timer += packet.duration;
 
-      Red = data[DMXStart];
-      Green = data[DMXStart + 1];
-      Blue = data[DMXStart + 2];
-      Mode = data[DMXStart + 3];
-      Speed = data[DMXStart +4];
+      Red = DMXdata[DMXStart];
+      Green = DMXdata[DMXStart + 1];
+      Blue = DMXdata[DMXStart + 2];
+      Mode = DMXdata[DMXStart + 3];
+      Speed = DMXdata[DMXStart +4];
 
       if (timer >= 1000000){
-        Serial.printf("Start code is 0x%02X and slot 4 is 0x%02X\n", data[0], data[4]);
+        Serial.printf("Start code is 0x%02X and slot 4 is 0x%02X\n", DMXdata[0], DMXdata[4]);
         timer -= 1000000;
       }
     }
