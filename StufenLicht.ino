@@ -12,11 +12,12 @@ int recievePin = 3;
 int transmitPin = 1;
 int enablePin = 4;
 
-dmx_port_t dmxPort = 1;
-byte DMXdata[DMX_MAX_PACKET_SIZE];
-QueueHandle_t queue;
-unsigned int timer = 0;
+dmx_port_t dmxPort = 0;
+byte DMXdata[5];
 bool dmxIsConnected = false;
+unsigned long lastUpdate = millis();
+QueueHandle_t queue;
+
 
 uint16_t DMXStart;
 uint16_t NumPixelA;
@@ -41,6 +42,11 @@ int32_t lastBlink = 0;
 byte blinkState = 0;
 uint8_t progress = 0;
 
+NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Sk6812Method>* StripA = NULL;
+NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt1Sk6812Method>* StripB = NULL;
+NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt2Sk6812Method>* StripC = NULL;
+NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt3Sk6812Method>* StripD = NULL;
+
 void setup(){
   data.begin("DMXPreferences", RO_MODE);
   if (!data.isKey("DMXStartAddr")){
@@ -48,88 +54,60 @@ void setup(){
     //first boot enter Web config
   }
   else{
-    uint16_t DMXStart = data.getUShort("DMXStartAddr");
-    uint16_t NumPixelA = data.getUInt("NumPixelStipA");
-    uint16_t NumPixelB = data.getUInt("NumPixelStipB");
-    uint16_t NumPixelC = data.getUInt("NumPixelStripC");
-    uint16_t NumPixelD = data.getUInt("NumPixelStripD");
+    DMXStart = data.getUInt("DMXStartAddr");
+    NumPixelA = data.getUInt("NumPixelStipA");
+    NumPixelB = data.getUInt("NumPixelStipB");
+    NumPixelC = data.getUInt("NumPixelStripC");
+    NumPixelD = data.getUInt("NumPixelStripD");
   }
-  if (NumPixelA != 0){
-    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Sk6812Method> StripA(NumPixelA, PinStripA);
-  }
+  StripA = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt0Sk6812Method>(NumPixelA, PinStripA);
+  StripB = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt1Sk6812Method>(NumPixelB, PinStripB);
+  StripC = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt2Sk6812Method>(NumPixelC, PinStripC);
+  StripD = new NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt3Sk6812Method>(NumPixelD, PinStripD);
 
-  if (NumPixelB != 0){
-    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt1Sk6812Method> StripB(NumPixelB, PinStripB);
-  }
-
-  if (NumPixelC != 0){
-    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt2Sk6812Method> StripC(NumPixelC, PinStripC);
-  }
-
-  if (NumPixelD != 0){
-    NeoPixelBus<NeoGrbFeature, NeoEsp32Rmt3Sk6812Method> StripD(NumPixelD, PinStripD);
-  }
-
-  dmx_config_t dmxConfig = DMX_DEFAULT_CONFIG;
-  dmx_param_config(dmxPort, &dmxConfig);
+  dmx_config_t config = DMX_CONFIG_DEFAULT;
+  dmx_driver_install(dmxPort, &config, DMX_INTR_FLAGS_DEFAULT);
   dmx_set_pin(dmxPort, transmitPin, recievePin, enablePin);
-  int queueSize = 1;
-  int interruptPriority = 1;
-  dmx_driver_install(dmxPort, DMX_MAX_PACKET_SIZE, queueSize, &queue, interruptPriority);
 
-  if (NumPixelA != 0){
-    StripA.Begin();
-  }
-  if (NumPixelB != 0){
-    StripB.Begin();
-  }
-  if (NumPixelC != 0){
-    StripC.Begin();
-  }
-  if (NumPixelD != 0){
-    StripD.Begin();
-  }
-  StripA.Show();
-  StripB.Show();
+  StripA->Begin();
+  StripB->Begin();
+  StripC->Begin();
+  StripD->Begin();
+
+  StripA->Show();
+  StripB->Show();
+  StripC->Show();
+  StripD->Show();
 }
 
 void loop(){
-  dmx_event_t packet;
-  if(xQueueReceive(queue, &packet, DMX_RX_PACKET_TOUT_TICK)){
-    if(packet.status == DMX_OK){
-      if (!dmxIsConnected){
-        Serial.println("DMX connected!");
-        dmxIsConnected = true;
-      }
-      dmx_read_packet(dmxPort, DMXdata, packet.size);
-      timer += packet.duration;
+  dmx_packet_t packet;
+  if(dmx_receive(dmxPort, &packet, DMX_TIMEOUT_TICK)){
 
+    if(!packet.err){
+      if (!dmxIsConnected){
+        dmxIsConnected = true;
+        //DMX is cinnected!
+      }
+      dmx_read_offset(dmxPort, DMXStart, DMXdata, 5);
       Red = DMXdata[DMXStart];
       Green = DMXdata[DMXStart + 1];
       Blue = DMXdata[DMXStart + 2];
       Mode = DMXdata[DMXStart + 3];
       Speed = DMXdata[DMXStart +4];
-
-      if (timer >= 1000000){
-        Serial.printf("Start code is 0x%02X and slot 4 is 0x%02X\n", DMXdata[0], DMXdata[4]);
-        timer -= 1000000;
-      }
-    }
-    else{
-      Serial.println("DMX error!");
     }
   }
-  else if(dmxIsConnected){
+  else{
     Red = 0;
     Green = 0;
     Blue = 0;
     Mode = 0;
     Speed = 0;
-    Serial.println("DMX timed out!");
   }
-  uint8_t* PixelsA = StripA.Pixels();
-  uint8_t* PixelsB = StripB.Pixels();
-
+  uint8_t* PixelsA = StripA->Pixels();
+  uint8_t* PixelsB = StripB->Pixels();
+  uint8_t* PixelsC = StripC->Pixels();
+  uint8_t* PixelsD = StripD->Pixels();
   //Static
   if (Mode < 64){
       for (int i = 0; i < NumPixelA; i++){
@@ -142,10 +120,22 @@ void loop(){
         PixelsB[i * 3 + 1] = Green;
         PixelsB[i * 3 + 2] = Blue;
       }
-      StripA.Dirty();
-      StripB.Dirty();
+      for (int i = 0; i < NumPixelC; i++){
+        PixelsC[i * 3] = Red;
+        PixelsC[i * 3 + 1] = Green;
+        PixelsC[i * 3 + 2] = Blue;
+      }
+      for (int i = 0; i < NumPixelD; i++){
+        PixelsD[i * 3] = Red;
+        PixelsD[i * 3 + 1] = Green;
+        PixelsD[i * 3 + 2] = Blue;
+      }
+      StripA->Dirty();
+      StripB->Dirty();
+      StripC->Dirty();
+      StripD->Dirty();
   }
-  //Blinken
+/*  //Blinken
   else if (Mode >= 64 && Mode < 128){
     int calc = -6 * Speed + 1750;
     if (blinkState == 0 && millis() - lastBlink > 500){
@@ -172,6 +162,7 @@ void loop(){
     StripA.Dirty();
     StripB.Dirty();
   }
+  */
 //   //Rainbow
 //   else if (Mode >=2 && Mode < 3){
 //     uint32_t offset = millis() * Speed >> 10;
@@ -206,8 +197,10 @@ void loop(){
 //       }
 //     }
 //   }
-  StripA.Show();
-  StripB.Show();
+  StripA->Show();
+  StripB->Show();
+  StripC->Show();
+  StripD->Show();
   }
 
 // byte RainbowRot(unsigned int offset){
